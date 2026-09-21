@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="egg李" />
+    <meta name="theme-color" content="#3B57E0" />
+    <link rel="manifest" href="/manifest.json" />
+    <!-- 内容安全策略：限制脚本/样式/连接来源，防御 XSS 与数据外泄 -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self' 'unsafe-inline' data: blob:;
+                   connect-src 'self' http://192.168.*:19000 http://10.*:19000 http://100.*:19000 http://localhost:19000 http://127.0.0.1:19000 ws://192.168.*:19000 ws://10.*:19000 ws://100.*:19000 ws://localhost:19000 https://*.aliyuncs.com https://*.deepseek.com https://*.xf-yun.com https://*.xfyun.cn https://*.volces.com https://*.volcengine.com https://*.tcloudbasegateway.com https://*.supabase.co https://aip.baidubce.com https://*.bcebos.com https://alphacephei.com https://*.github.com https://*.githubusercontent.com https://*.lanzouw.com https://*.lanrar.com https://*.quark.cn https://*.tencent.com https://hf-mirror.com https://huggingface.co https://cdn.jsdelivr.net https://kkgithub.com https://bgithub.xyz https://ghproxy.com https://tessdata.projectnaptha.com;
+                   script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:;
+                   worker-src 'self' blob:;
+                   img-src 'self' data: blob: https:;
+                   media-src 'self' blob: data:;
+                   frame-ancestors 'none';" />
+    <!-- 防止移动端浏览器对电话号码错误识别 -->
+    <meta name="format-detection" content="telephone=no" />
+    <title>egg李</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
