@@ -471,9 +471,9 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     ySpread: 72,
     speedMin: 0.55,
     speedMax: 1.5,
-    // 绝大多数星只有 1~1.5px，靠数量做密度；最亮一档也只到 4.75px
-    sizeMin: 1.35,
-    sizeMax: 5.2,
+    // 绝大多数星 2px 上下，最亮一档到 8px；仍远小于「光斑」区间
+    sizeMin: 1.9,
+    sizeMax: 8.2,
     opacity: 1,
     banded: true,
   });
@@ -484,8 +484,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     ySpread: 46,
     speedMin: 1.0,
     speedMax: 2.4,
-    sizeMin: 1.2,
-    sizeMax: 2.6,
+    sizeMin: 1.6,
+    sizeMax: 3.6,
     opacity: 0.72,
     banded: false,
   });
@@ -493,7 +493,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   createMeteors(keep(new THREE.PlaneGeometry(1, 1)));
 
   // 天穹层：月亮 / 卫星过境 / 低空云带 —— 挂在相机上，视为无限远
-  const dome = createSkyDome(THREE, { isMobile, reduceMotion });
+  const dome = createSkyDome(THREE, { isMobile, reduceMotion, px: renderer.getPixelRatio() });
   camera.add(dome.group);
 
   // ── 滚动 → 穿越（可逆：只由滚动位置决定）
@@ -540,7 +540,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     world.rotation.y = pointerX * 0.02;
     world.rotation.x = -pointerY * 0.012;
 
-    dome.update(step, elapsed, camera.aspect, pointerX, pointerY);
+    dome.update(step, elapsed, camera.aspect, pointerX, pointerY, travel);
 
     for (const item of shapes) {
       const z = wrapZ(item.baseZ + travel * item.speed, item.range);

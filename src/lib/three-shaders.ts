@@ -51,7 +51,7 @@ void main() {
   vFar = clamp(d / uRange, 0.0, 1.0);
   // aSize 就是目标 CSS 直径；乘像素比得到设备像素，再给一点抖动避免「全班一样大」
   float px = aSize * uPx * mix(0.9, 1.12, fract(aPhase * 7.0));
-  vRay = smoothstep(7.0, 10.0, px);
+  vRay = smoothstep(15.0, 24.0, px);
   gl_PointSize = px;
   gl_Position = clip;
 }`;
