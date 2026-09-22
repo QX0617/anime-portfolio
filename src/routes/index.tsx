@@ -8,6 +8,7 @@ import { AboutSection } from "@/components/AboutSection";
 import { ContactSection } from "@/components/ContactSection";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SettingsDrawer } from "@/components/SettingsDrawer";
+import { ThreeBackground } from "@/components/ThreeBackground";
 
 export const Route = createFileRoute("/")({
   component: PortfolioPage,
@@ -35,6 +36,8 @@ function PortfolioShell() {
 
   return (
     <div className="relative min-h-[100svh]">
+      {/* 页面级 3D 星海：夜色底 + 画布，铺在区块背景之上、正文之下 */}
+      <ThreeBackground />
       <Navbar />
       <main>
         <HeroSection />

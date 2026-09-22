@@ -98,11 +98,7 @@ interface MeteorItem {
   baseOpacity: number;
 }
 
-export function createThreeScene(
-  THREE: ThreeModule,
-  host: HTMLElement,
-  isHidden?: () => boolean
-): () => void {
+export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => void {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
@@ -626,7 +622,6 @@ export function createThreeScene(
     raf = requestAnimationFrame(frame);
     const delta = Math.min(clock.getDelta(), 0.2);
     if (document.hidden) return; // 后台标签页停绘
-    if (isHidden?.()) return; // 天空滚出首屏后停绘
     pending += delta;
     if (pending < minDelta) return; // 帧率上限：省电
     const step = pending;

@@ -83,13 +83,13 @@ export function ProjectsSection() {
         <div className="relative z-10 mx-auto max-w-6xl px-6">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="reveal font-mono text-xs uppercase tracking-[0.3em] text-lilac">works</p>
-              <h2 className="reveal reveal-up mt-3 font-display text-3xl font-bold tracking-tight text-ink sm:text-[2.6rem]">
+              <p className="reveal font-mono text-xs uppercase tracking-[0.3em] text-night-label">works</p>
+              <h2 className="reveal reveal-up mt-3 font-display text-3xl font-bold tracking-tight text-night-ink sm:text-[2.6rem]">
                 小玩意儿<span className="aurora-text">陈列室</span>
               </h2>
-              <p className="reveal reveal-up mt-3 text-sm text-ink-soft">
+              <p className="reveal reveal-up mt-3 text-sm text-night-ink-soft">
                 AI 工具 · 数字玩具 · 开源贡献 —— 共 {visibleProjects.length} 个作品{editMode && projects.length !== visibleProjects.length ? `（含 ${projects.length - visibleProjects.length} 个已隐藏）` : ""}
-                {editMode && <span className="ml-2 text-[11px] text-muted-foreground">· 拖拽卡片可排序</span>}
+                {editMode && <span className="ml-2 text-[11px] text-night-ink-soft/70">· 拖拽卡片可排序</span>}
               </p>
             </div>
 
@@ -128,7 +128,7 @@ export function ProjectsSection() {
               <p className="font-display text-lg font-bold text-ink">
                 {editMode ? "还没有作品，从第一个开始吧" : "这里还很安静"}
               </p>
-              <p className="max-w-sm text-sm text-muted-foreground">
+              <p className="max-w-sm text-sm text-ink-soft">
                 {editMode
                   ? "支持上传源代码 zip、构建产物（zip 或多文件）、单文件静态网页 —— 上传即可在站内直接体验。"
                   : "站长正在把 AI 小工具和开源贡献一个个搬上来，稍后再来逛逛。"}

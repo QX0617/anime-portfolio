@@ -4,8 +4,8 @@ import { useSite } from "@/lib/site-context";
 export function SiteFooter() {
   const { settings } = useSite();
   return (
-    <footer className="relative z-10 border-t border-border/60 bg-background/70 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-muted-foreground sm:flex-row">
+    <footer className="relative z-10 border-t border-white/10 bg-ink/75 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-night-ink-soft sm:flex-row">
         <p>
           © {new Date().getFullYear()} {settings.username} · 用
           <span className="mx-1 text-bubble">♥</span>

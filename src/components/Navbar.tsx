@@ -61,7 +61,13 @@ export function Navbar() {
             />
             <span className="absolute -inset-1 rounded-full bg-[radial-gradient(circle,var(--color-bubble)_0%,transparent_70%)] opacity-0 blur-md transition group-hover:opacity-60" />
           </span>
-          <span className="truncate font-display text-[15px] font-bold tracking-tight text-ink">
+          {/* 导航未滚动时没有自己的底色，字色要跟夜色底走；滚动后落在玻璃条上，换回深墨 */}
+          <span
+            className={cn(
+              "truncate font-display text-[15px] font-bold tracking-tight transition-colors duration-500",
+              scrolled ? "text-ink" : "text-night-ink",
+            )}
+          >
             {settings.username}
           </span>
         </a>
@@ -72,7 +78,12 @@ export function Navbar() {
               key={item.id}
               href={`#${item.id}`}
               data-active={active === item.id}
-              className="story-link text-sm font-medium text-ink-soft transition-colors hover:text-ink data-[active=true]:text-lilac"
+              className={cn(
+                "story-link text-sm font-medium transition-colors",
+                scrolled
+                  ? "text-ink-soft hover:text-ink data-[active=true]:text-lilac"
+                  : "text-night-ink-soft/85 hover:text-night-ink data-[active=true]:text-night-label",
+              )}
             >
               {item.label}
             </a>

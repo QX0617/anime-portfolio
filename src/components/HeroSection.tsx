@@ -2,7 +2,6 @@ import { ArrowDown, Sparkle } from "lucide-react";
 import { useSite } from "@/lib/site-context";
 import { DEFAULT_AVATAR } from "@/lib/types";
 import { SectionBackground } from "@/components/SectionBackground";
-import { ThreeBackground } from "@/components/ThreeBackground";
 import { EditTag, EditZone } from "@/components/EditOverlay";
 import { AuroraLink } from "@/components/ui/aurora-button";
 
@@ -13,8 +12,6 @@ export function HeroSection() {
     <EditZone>
       <section id="hero" className="relative flex min-h-[100svh] items-center justify-center overflow-hidden">
         <SectionBackground section="hero" />
-        {/* 夜空属于首屏：黄昏底 + 星屑 + 天穹层，跟着这一屏一起滚走 */}
-        <ThreeBackground />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-background" />
 
         <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center px-6 pb-24 pt-32 text-center">
@@ -28,16 +25,16 @@ export function HeroSection() {
             />
           </div>
 
-          <p className="reveal mb-4 inline-flex items-center gap-1.5 rounded-full bg-white/60 px-4 py-1.5 text-xs font-semibold tracking-wide text-lilac shadow-sm backdrop-blur">
-            <Sparkle size={13} className="fill-lilac text-lilac" />
+          <p className="reveal mb-4 inline-flex items-center gap-1.5 rounded-full bg-ink/85 px-4 py-1.5 text-xs font-semibold tracking-wide text-night-label shadow-sm ring-1 ring-white/15 backdrop-blur">
+            <Sparkle size={13} className="fill-bubble text-bubble" />
             PORTFOLIO · AI 玩具与开源手记
           </p>
 
-          <h1 className="reveal reveal-up font-display text-[clamp(2.4rem,8vw,4.6rem)] font-extrabold leading-[1.05] tracking-tight text-ink">
+          <h1 className="reveal reveal-up font-display text-[clamp(2.4rem,8vw,4.6rem)] font-extrabold leading-[1.05] tracking-tight text-night-ink">
             <span className="aurora-text">{settings.username}</span>
           </h1>
 
-          <p className="reveal reveal-up mt-5 max-w-xl text-balance text-base leading-relaxed text-ink-soft sm:text-lg" data-reveal-delay="120">
+          <p className="reveal reveal-up mt-5 max-w-xl text-balance text-base leading-relaxed text-night-ink-soft sm:text-lg" data-reveal-delay="120">
             {settings.tagline}
           </p>
 
@@ -61,7 +58,7 @@ export function HeroSection() {
 
           <a
             href="#works"
-            className="reveal mt-14 inline-flex flex-col items-center gap-1.5 text-xs font-medium tracking-[0.2em] text-ink-soft/70 transition hover:text-lilac"
+            className="reveal mt-14 inline-flex flex-col items-center gap-1.5 text-xs font-medium tracking-[0.2em] text-night-ink-soft/75 transition hover:text-night-label"
           >
             向下探索
             <ArrowDown size={15} className="animate-bounce" />

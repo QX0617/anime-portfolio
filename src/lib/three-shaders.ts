@@ -40,9 +40,9 @@ void main() {
   float alt = clamp((clip.y / max(0.0001, clip.w) + 1.0) * 0.5, 0.0, 1.0);
   float secAlt = 1.0 / max(0.18, sin(alt * 1.48353));
   vFade *= mix(1.0, 0.6, clamp(secAlt - 1.0, 0.0, 1.0));
-  // 关键一条：星只在天空足够暗的地方看得见。黄昏底覆盖视口上方，往下淡出成近白页面，
-  // 白星落在那片区域本就该消失 —— 不做这个耦合，结果就是「下方一整片什么都没有」。
-  vFade *= mix(0.18, 1.0, smoothstep(0.05, 0.45, alt));
+  // 朝地平线方向再多消光一点（大气路径长）。夜色底现在铺满整屏，
+  // 所以这里只留一点梯度，不再把画面下方一整片抹掉。
+  vFade *= mix(0.74, 1.0, smoothstep(0.05, 0.45, alt));
   vTwAmp = aTwink * min(0.3, 0.05 * pow(secAlt, 1.5));
   vTwRate = 1.2 + aPhase * 5.4;
 

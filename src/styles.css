@@ -45,6 +45,9 @@
   --color-butter: var(--butter);
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
+  --color-night-ink: var(--night-ink);
+  --color-night-ink-soft: var(--night-ink-soft);
+  --color-night-label: var(--night-label);
 
   --font-display: var(--font-display);
   --font-sans: var(--font-sans);
@@ -61,7 +64,9 @@
   --background: oklch(0.982 0.007 305);
   --foreground: oklch(0.31 0.062 288);
 
-  --card: oklch(1 0 0 / 72%);
+  /* 卡片要压得住夜色底：原来 72% 的白在夜空上合成后只剩 Y≈0.59，
+     卡内的 --ink-soft 掉到 4.8:1、辅助灰直接不及格。提到 86% 保留一点透感。 */
+  --card: oklch(1 0 0 / 86%);
   --card-foreground: oklch(0.31 0.062 288);
   --popover: oklch(0.995 0.004 305);
   --popover-foreground: oklch(0.31 0.062 288);
@@ -91,6 +96,12 @@
   --butter: oklch(0.875 0.11 92);
   --ink: oklch(0.28 0.07 288);
   --ink-soft: oklch(0.45 0.05 288);
+
+  /* 夜色墨色：星空铺满整屏，直接压在天空上的文字必须往亮走。
+     卡片自带浅色底（glass-card），里面的文字仍用上面的 --ink / --ink-soft。 */
+  --night-ink: oklch(0.985 0.008 285);
+  --night-ink-soft: oklch(0.9 0.028 288);
+  --night-label: oklch(0.86 0.105 312);
 }
 
 @layer base {
@@ -134,7 +145,7 @@
 @layer components {
   /* 磨砂柔光卡片 */
   .glass-card {
-    background: color-mix(in oklab, var(--color-card) 78%, transparent);
+    background: color-mix(in oklab, var(--color-card) 84%, transparent);
     backdrop-filter: blur(18px) saturate(150%);
     -webkit-backdrop-filter: blur(18px) saturate(150%);
     border: 1px solid color-mix(in oklab, white 65%, var(--color-border));
@@ -151,8 +162,25 @@
     border: 1px solid color-mix(in oklab, white 60%, var(--color-border));
   }
 
-  /* 炫彩渐变文字 */
+  /* 炫彩渐变文字。
+     默认这版是「夜里的霓虹」：亮 + 高饱和。原来那组 deep 色压在夜色底上只有 2:1，
+     读不出来；浅色卡片里要原来的观感就再加一个 .aurora-text-on-light。 */
   .aurora-text {
+    background-image: linear-gradient(
+      100deg,
+      oklch(0.84 0.135 355),
+      oklch(0.855 0.11 305) 32%,
+      oklch(0.88 0.1 232) 62%,
+      oklch(0.84 0.135 355) 95%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: aurora-slide 9s ease-in-out infinite;
+  }
+
+  .aurora-text-on-light {
     background-image: linear-gradient(
       100deg,
       var(--color-bubble),
@@ -160,11 +188,6 @@
       var(--color-sky) 62%,
       var(--color-bubble) 95%
     );
-    background-size: 220% 100%;
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    animation: aurora-slide 9s ease-in-out infinite;
   }
 
   .aurora-bg {
