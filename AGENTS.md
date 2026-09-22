@@ -4,7 +4,7 @@
 
 - **jszip** — 浏览器端解压用户上传的构建产物 / 源码 zip（解压与入口识别全在前端完成，云函数不参与文件处理）
 - **base64-arraybuffer** — Meoo Cloud Storage 上传要求 ArrayBuffer 载荷，用其 `decode` 把 base64 转成 ArrayBuffer
-- **three** — 页面级 3D 星海背景：`components/ThreeBackground.tsx`（薄壳 + 黄昏底）、`lib/three-scene.ts`（星屑/粉尘/星云/流星 + 滚动穿越）、`lib/three-shaders.ts`（GLSL）、`lib/sky-dome.ts`（天穹层：月亮 / 卫星过境 / 低空云带）、`lib/bg3d.ts`（唯一开关，localStorage `pf-bg3d`）。用 `import("three")` 动态引入（构建成独立 chunk，不进首屏），类型来自 devDependency `@types/three`（three 自身不发 `.d.ts`）
+- **three** — 页面级 3D 星海背景：`components/ThreeBackground.tsx`（薄壳 + 夜色底）、`lib/three-scene.ts`（星屑/粉尘/星云/流星 + 滚动穿越）、`lib/three-shaders.ts`（GLSL）、`lib/celestial.ts`（**世界空间天体场**：地球+月亮、气态巨行星与环、熔岩行星、冰矮星、脉冲星、黑洞、星系、彗星）、`lib/bg3d.ts`（唯一开关，localStorage `pf-bg3d`）。用 `import("three")` 动态引入（构建成独立 chunk，不进首屏），类型来自 devDependency `@types/three`（three 自身不发 `.d.ts`）
 - **Google Fonts（CDN link）** — Baloo 2（标题）/ Noto Sans SC（正文）/ JetBrains Mono（代码感点缀），在 `index.html` 引入
 
 ## Architecture

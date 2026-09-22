@@ -11,7 +11,7 @@ export function ContactSection() {
     <EditZone>
       <section id="contact" className="relative overflow-hidden py-24 sm:py-32">
         <SectionBackground section="contact" />
-        <div className="relative z-10 mx-auto max-w-3xl px-6 text-center">
+        <div className="night-scrim night-text relative z-10 mx-auto max-w-3xl px-6 py-10 text-center">
           <p className="reveal font-mono text-xs uppercase tracking-[0.3em] text-night-label">contact</p>
           <h2 className="reveal reveal-up mt-4 font-display text-3xl font-bold tracking-tight text-night-ink sm:text-[2.6rem]">
             一起做点<span className="aurora-text">温柔又炫酷</span>的东西

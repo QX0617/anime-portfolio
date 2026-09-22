@@ -82,7 +82,7 @@ export function ProjectsSection() {
 
         <div className="relative z-10 mx-auto max-w-6xl px-6">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-            <div>
+            <div className="night-scrim night-text -mx-4 px-4 py-2">
               <p className="reveal font-mono text-xs uppercase tracking-[0.3em] text-night-label">works</p>
               <h2 className="reveal reveal-up mt-3 font-display text-3xl font-bold tracking-tight text-night-ink sm:text-[2.6rem]">
                 小玩意儿<span className="aurora-text">陈列室</span>

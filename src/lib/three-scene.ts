@@ -4,8 +4,8 @@
 // 1) 纵深回绕一律放在着色器里（GPU 侧 mod 取模），前端每帧只推一个"已飞行距离"；
 //    星屑/光尘/星云加到几千个也不掉帧——绝不要改成逐帧在 JS 里改顶点或重建几何体。
 // 2) 回绕必须发生在看不见的地方（相机后方 + 远平面附近），两端淡入淡出是配套手段。
-// 3) CPU 侧只更新几十个对象（流星 + 天穹层的轨道天体），这个数量级不能涨；
-//    它们全是 `position/rotation/scale` 级别的变换，绝不逐帧改顶点或重建几何体。
+// 3) CPU 侧每帧只更新几十个对象（流星 + 天体场的十几个天体），
+//    且全是 position/scale/rotation/uniform 级别的操作。
 // 4) 推进量只由"滚动位置"决定（可逆、按可滚动范围归一化并夹紧），不做时间累积式单向飞行。
 // 5) 穿梭感来自**透视**：星点的屏幕速度 = uFly × uProj / d，近处必然比远处快得多。
 //    把尺寸改成常数可以（避免光斑），把 1/d 从速度里也拿掉就等于把三维场景拍扁 ——
@@ -21,7 +21,7 @@ import {
   STAR_FRAG,
   STAR_VERT,
 } from "@/lib/three-shaders";
-import { createSkyDome } from "@/lib/sky-dome";
+import { createCelestialField } from "@/lib/celestial";
 
 type ThreeModule = typeof import("three");
 
@@ -120,7 +120,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 900);
   camera.position.set(0, 0, CAMERA_Z);
-  // 天穹层是相机的子节点，相机必须在场景图里才会被遍历到
+  // project() 要用到 camera.matrixWorldInverse，让相机留在场景图里保证它被更新
   scene.add(camera);
 
   const renderer = new THREE.WebGLRenderer({
@@ -517,9 +517,12 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   // createShapes(); // 同上，几何体停用
   createMeteors(keep(new THREE.PlaneGeometry(1, 1)));
 
-  // 天穹层：月亮 / 卫星过境 / 低空云带 —— 挂在相机上，视为无限远
-  const dome = createSkyDome(THREE, { isMobile, reduceMotion, px: renderer.getPixelRatio() });
-  camera.add(dome.group);
+  // 天体场：与星屑同一个 world、同一条 travel、同一个快门常数
+  const field = createCelestialField(THREE, world, {
+    isMobile,
+    reduceMotion,
+    shutter: STREAK_SECONDS,
+  });
 
   // ── 滚动 → 穿越（可逆：只由滚动位置决定）
   let travel = 0;
@@ -542,6 +545,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   }
 
   let elapsed = 0;
+  /** 视口半高（设备像素）：天体的屏幕速度换算要用 */
+  let halfH = 450;
 
   function pose(step: number): void {
     const travelK = 1 - Math.exp(-step * 6);
@@ -575,7 +580,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     world.rotation.y = pointerX * 0.02;
     world.rotation.x = -pointerY * 0.012;
 
-    dome.update(step, elapsed, camera.aspect, pointerX, pointerY, travel);
+    field.update(step, elapsed, travel, camera, halfH);
 
     for (const item of shapes) {
       const z = wrapZ(item.baseZ + travel * item.speed, item.range);
@@ -631,8 +636,9 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     // 不再用透视投影系数 —— 按 1/纵深 放大正是把近处星撑成 20~50px 光斑的来源。
     const px = renderer.getPixelRatio();
     for (const u of pxUniforms) u.value = px;
+    halfH = height * px * 0.5;
     // 1 个世界单位在 d=1 处占多少设备像素：透视尺寸与拖影长度都靠它换算
-    const proj = height * px * 0.5 / Math.tan((FOV * Math.PI) / 360);
+    const proj = halfH / Math.tan((FOV * Math.PI) / 360);
     for (const u of projUniforms) u.value = proj;
     readScroll();
     if (reduceMotion) {
@@ -694,7 +700,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     window.removeEventListener("scroll", readScroll);
     window.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("webglcontextlost", onContextLost);
-    dome.dispose();
+    field.dispose();
     for (const item of disposables) {
       try {
         item.dispose();

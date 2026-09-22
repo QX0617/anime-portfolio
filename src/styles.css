@@ -248,6 +248,25 @@
     border-radius: var(--radius-xl);
   }
 
+  /* 直接压在星海上的文字：给一块「比星暗」的余量。
+     天体现在有大体积与亮度，一颗行星正好滑到标题后面时，
+     浅色小字会被吃掉对比度 —— 这层径向暗晕 + 文字投影是兜底，
+     故意做得很柔（不是灰板：靠 radial-gradient 的椭圆边缘融进夜空）。 */
+  .night-scrim {
+    position: relative;
+  }
+  .night-scrim::before {
+    content: "";
+    position: absolute;
+    inset: -14% -22%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, rgb(5 7 22 / 80%) 0%, rgb(5 7 22 / 46%) 52%, transparent 78%);
+  }
+  .night-text {
+    text-shadow: 0 1px 16px rgb(3 5 18 / 85%), 0 0 3px rgb(3 5 18 / 55%);
+  }
+
   .sparkle-field {
     background-image:
       radial-gradient(1.6px 1.6px at 12% 22%, rgb(255 255 255 / 90%) 50%, transparent 51%),

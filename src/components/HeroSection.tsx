@@ -14,7 +14,7 @@ export function HeroSection() {
         <SectionBackground section="hero" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-background" />
 
-        <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center px-6 pb-24 pt-32 text-center">
+        <div className="night-scrim night-text relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center px-6 pb-24 pt-32 text-center">
           <div className="reveal-zoom reveal relative mb-8">
             <span className="absolute -inset-6 rounded-full bg-[conic-gradient(from_140deg,var(--color-bubble),var(--color-lilac),var(--color-sky),var(--color-mint),var(--color-bubble))] opacity-45 blur-2xl" />
             <span className="absolute -inset-2 animate-[spin_14s_linear_infinite] rounded-full border-2 border-dashed border-white/60" />
