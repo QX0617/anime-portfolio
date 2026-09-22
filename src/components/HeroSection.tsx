@@ -2,6 +2,7 @@ import { ArrowDown, Sparkle } from "lucide-react";
 import { useSite } from "@/lib/site-context";
 import { DEFAULT_AVATAR } from "@/lib/types";
 import { SectionBackground } from "@/components/SectionBackground";
+import { ThreeBackground } from "@/components/ThreeBackground";
 import { EditTag, EditZone } from "@/components/EditOverlay";
 import { AuroraLink } from "@/components/ui/aurora-button";
 
@@ -12,6 +13,8 @@ export function HeroSection() {
     <EditZone>
       <section id="hero" className="relative flex min-h-[100svh] items-center justify-center overflow-hidden">
         <SectionBackground section="hero" />
+        {/* 夜空属于首屏：黄昏底 + 星屑 + 天穹层，跟着这一屏一起滚走 */}
+        <ThreeBackground />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-background" />
 
         <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center px-6 pb-24 pt-32 text-center">
