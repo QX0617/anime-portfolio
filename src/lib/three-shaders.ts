@@ -2,42 +2,58 @@
 //
 // 契约（与 lib/three-scene.ts 的 uniform 一一对应，改任一侧必须同步）：
 // - 纵深回绕全在顶点着色器里用 mod 完成，JS 每帧只推 uTravel 一个值。
-// - 回绕点必须落在看不见的地方：靠 vFade / vDepthFade 在相机后方与远平面附近淡出。
-// - 星屑用普通混合 + 饱和色（浅色炫彩底上才有对比），只有大面积柔光才用加色混合。
+// - 回绕点必须落在看不见的地方：靠 vFade 在相机后方与远平面附近淡出。
+// - **星点是光源不是圆面**：肉眼永远分辨不出恒星圆面（极限约 1′，最大的参宿四也只有 0.04″），
+//   所以尺寸只由星等决定（aSize = CSS 像素），**不再随纵深 1/d 放大**——
+//   一旦按透视放大，近处星就变成 20~50px 的光斑，正是「糊」与「不像星空」的根因。
+// - 加色混合：星要「亮过底」，底必须比星暗（见 ThreeBackground.tsx 的黄昏底）。
+// - 闪烁只给一部分星，幅度随仰角降低而增大（大气路径更长），频率 0.2~1.2Hz 量级。
 
-/** 星屑 / 光尘：一次 draw call 画几千颗，纵深循环 + 大小分级 + 呼吸明灭 */
+/** 星屑 / 光尘：一次 draw call 画几千颗，纵深循环 + 星等定尺寸 + 随仰角消光与闪烁 */
 export const STAR_VERT = /* glsl */ `
 attribute float aSize;
 attribute float aHue;
 attribute float aPhase;
 attribute float aSpeed;
+attribute float aTint;
+attribute float aTwink;
 uniform float uTravel;
 uniform float uTime;
-uniform float uScale;
+uniform float uPx;
 uniform float uRange;
 varying float vFade;
 varying float vHue;
-varying float vTwinkle;
-varying float vFar;
+varying float vTint;
+varying float vTwAmp;
+varying float vTwRate;
 varying float vRay;
+varying float vFar;
 void main() {
   vec3 p = position;
   // 走满 uRange 就从最远处重新开始：永远滑不到头
   p.z = mod(position.z + uTravel * aSpeed, uRange) - uRange * 0.5;
-  vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  float d = -mv.z;
+  vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  float d = -(modelViewMatrix * vec4(p, 1.0)).z;
   vFade = smoothstep(1.5, 9.0, d) * (1.0 - smoothstep(uRange * 0.42, uRange * 0.56, d));
+
+  // 画面下方 = 地平线方向：大气路径更长 → 更暗（消光）但更容易闪、色偏更明显
+  float alt = clamp((clip.y / max(0.0001, clip.w) + 1.0) * 0.5, 0.0, 1.0);
+  float secAlt = 1.0 / max(0.18, sin(alt * 1.48353));
+  vFade *= mix(1.0, 0.6, clamp(secAlt - 1.0, 0.0, 1.0));
+  // 关键一条：星只在天空足够暗的地方看得见。黄昏底覆盖视口上方，往下淡出成近白页面，
+  // 白星落在那片区域本就该消失 —— 不做这个耦合，结果就是「下方一整片什么都没有」。
+  vFade *= mix(0.18, 1.0, smoothstep(0.05, 0.45, alt));
+  vTwAmp = aTwink * min(0.3, 0.05 * pow(secAlt, 1.5));
+  vTwRate = 1.2 + aPhase * 5.4;
+
   vHue = aHue;
-  vTwinkle = 0.62 + 0.38 * sin(uTime * 1.7 + aPhase * 6.2831);
-  // 光针是「屏幕上够大」才画得出来的形态 —— 按真实像素尺寸分两级：
-  // 微尘保持实心小点，只有亮星才长芒。2px 的星芒等于没有。
-  float size = clamp(aSize * uScale / max(d, 0.8), 1.0, 56.0);
-  vRay = smoothstep(6.0, 20.0, size);
-  // 0 = 贴近相机（要锐），1 = 最远（只能轻微柔化，不能糊成一团）
+  vTint = aTint;
   vFar = clamp(d / uRange, 0.0, 1.0);
-  // 上限 56px：再大就只剩柔光，星点的“晶亮”会被摊平
-  gl_PointSize = size;
-  gl_Position = projectionMatrix * mv;
+  // aSize 就是目标 CSS 直径；乘像素比得到设备像素，再给一点抖动避免「全班一样大」
+  float px = aSize * uPx * mix(0.9, 1.12, fract(aPhase * 7.0));
+  vRay = smoothstep(7.0, 10.0, px);
+  gl_PointSize = px;
+  gl_Position = clip;
 }`;
 
 export const STAR_FRAG = /* glsl */ `
@@ -47,11 +63,14 @@ uniform vec3 uC3;
 uniform vec3 uC4;
 uniform float uHueShift;
 uniform float uOpacity;
+uniform float uTime;
 varying float vFade;
 varying float vHue;
-varying float vTwinkle;
-varying float vFar;
+varying float vTint;
+varying float vTwAmp;
+varying float vTwRate;
 varying float vRay;
+varying float vFar;
 vec3 palette(float h) {
   float x = fract(h);
   vec3 c = mix(uC1, uC2, clamp(x * 3.0, 0.0, 1.0));
@@ -59,37 +78,33 @@ vec3 palette(float h) {
   c = mix(c, uC4, clamp((x - 0.66) * 3.0, 0.0, 1.0));
   return c;
 }
-/** 一根针状光芒：调用前把要延伸的方向摆到 p.x */
+/** 一根短光针：只在最大的几颗星上出现，长度不超过星核的 1.5 倍 */
 float ray(vec2 p, float reach, float width) {
   float along = abs(p.x);
   float across = abs(p.y);
-  // 越往尖端越细 → 是「光针」不是「光条」
   float w = width * max(0.0, 1.0 - along / reach);
   float body = 1.0 - smoothstep(0.0, max(w, 0.0008), across);
-  return body * (1.0 - smoothstep(reach * 0.55, reach, along));
+  return body * (1.0 - smoothstep(reach * 0.5, reach, along));
 }
 void main() {
   vec2 uv = (gl_PointCoord - 0.5) * 2.0;
   float r = length(uv);
   if (r > 1.0) discard;
 
-  // 四芒星：竖 + 横两根光针，长度几乎顶到 sprite 边缘，越远收得越短
-  float reach = mix(0.99, 0.46, vFar);
-  float width = mix(0.075, 0.048, vFar);
-  float rays = max(ray(uv, reach, width), ray(uv.yx, reach, width)) * vRay;
+  // 高斯 PSF + 实心核：小尺寸下这就是肉眼看到的「一颗星」
+  float psf = exp(-pow(r * 2.3, 2.0));
+  float core = 1.0 - smoothstep(0.22, 0.62, r);
+  float reach = mix(0.5, 0.28, vFar);
+  float rays = max(ray(uv, reach, 0.05), ray(uv.yx, reach, 0.05)) * vRay;
 
-  // 实心核收紧：核一大就把光针吞掉，只剩一个圆点
-  float core = smoothstep(mix(0.24, 0.14, vFar), 0.0, r);
-  float halo = pow(smoothstep(1.0, 0.34, r), 4.0) * 0.2;
-
-  vec3 col = palette(vHue + uHueShift);
-  // 底色很亮，实测靠「饱和实心核 + 光针」才认得出是星，所以只在中芯点一点白
-  col = mix(col, vec3(1.0), core * core * 0.4);
-  float a = clamp(rays + core * 1.0 + halo, 0.0, 1.0);
-  gl_FragColor = vec4(col, clamp(a * vFade * vTwinkle * uOpacity, 0.0, 1.0));
+  // 绝大多数星是纯白：暗光下视杆细胞不辨色，只有最亮几颗看得出蓝白 / 暖黄
+  vec3 col = mix(vec3(1.0), palette(vHue + uHueShift), vTint);
+  float a = clamp(core * 1.0 + psf * 0.75 + rays * 0.6, 0.0, 1.0);
+  float tw = 1.0 - vTwAmp * (0.5 + 0.5 * sin(uTime * vTwRate + vHue * 6.2831));
+  gl_FragColor = vec4(col, clamp(a * vFade * tw * uOpacity, 0.0, 1.0));
 }`;
 
-/** 星云光团 / 远景发光体：大尺度柔光，加色混合只提亮不遮底 */
+/** 银河雾气：大尺度低对比的雾，只用来给密带一点厚度，不再画成有亮边的「云团」 */
 export const CLOUD_VERT = /* glsl */ `
 uniform float uTravel;
 uniform float uSpeed;
@@ -132,24 +147,20 @@ float noise(vec2 p) {
 void main() {
   vec2 uv = vUv - 0.5;
   float r = length(uv) * 2.0;
-  // 两层噪声：低频推动外缘（边界不规则）、高频做出云丝
   float n1 = noise(vUv * 3.4 + uSeed + vec2(uTime * 0.012, uTime * -0.008));
   float n2 = noise(vUv * 7.6 - uSeed * 1.3 + vec2(uTime * -0.02, uTime * 0.016));
   float n = n1 * 0.68 + n2 * 0.32;
-  // 外缘被噪声推着走 → 有明确边界但仍像云，而不是一个圆盘
   float rim = 0.74 + 0.22 * n1;
   float mask = 1.0 - smoothstep(rim * 0.86, rim, r);
-  // 贴边一道亮弧：加色混合下这是唯一能把「边界」读出来的手段
-  float rimLine = exp(-pow((r - rim * 0.88) / 0.05, 2.0)) * step(r, rim);
   float body = pow(smoothstep(1.0, 0.0, r), uSoft * 0.5);
-  float strands = 0.30 + 0.95 * pow(n, 1.3); // 提高对比 → 看得出丝缕，不是一片雾
-  float a = (body * mask * strands * 0.85 + rimLine * 0.75) * vDepthFade * uOpacity;
+  float strands = 0.30 + 0.95 * pow(n, 1.3);
+  // 不再画贴边亮弧：那道「轮廓」在近白底上会被读成肥皂泡
+  float a = body * mask * strands * 0.85 * vDepthFade * uOpacity;
   vec3 col = mix(uColorA, uColorB, clamp(n * 1.1 + vUv.y * 0.2, 0.0, 1.0));
-  col = mix(col, vec3(1.0), rimLine * 0.6);
   gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
 }`;
 
-/** 极光带：顶点起伏的大平面 */
+/** 极光带：顶点起伏的大平面（当前场景已不再使用，保留着色器备用） */
 export const RIBBON_VERT = /* glsl */ `
 uniform float uTime;
 uniform float uAmp;
@@ -178,12 +189,10 @@ uniform float uOpacity;
 varying vec2 vUv;
 varying float vDepthFade;
 void main() {
-  // 收窄边缘渐变：极光带要像一条「带」，过渡铺满整张 uv 就只剩一片雾
   float edgeX = smoothstep(0.0, 0.16, vUv.x) * smoothstep(1.0, 0.84, vUv.x);
   float edgeY = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.82, vUv.y);
-  // 上缘压一道亮边：让「带」的形状与走向读得出来
   float lip = exp(-pow((vUv.y - 0.70) / 0.075, 2.0));
-  float stria = 0.72 + 0.28 * sin(vUv.x * 24.0 + vUv.y * 8.0); // 纵向条纹 = 极光帘幕感
+  float stria = 0.72 + 0.28 * sin(vUv.x * 24.0 + vUv.y * 8.0);
   vec3 col = mix(uColorA, uColorB, clamp(vUv.x * 0.55 + vUv.y * 0.45, 0.0, 1.0));
   col = mix(col, vec3(1.0), lip * 0.6);
   float a = edgeX * edgeY * stria * (0.6 + 0.95 * lip) * uOpacity * vDepthFade;

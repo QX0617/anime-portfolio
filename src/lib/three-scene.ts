@@ -4,7 +4,7 @@
 // 1) 纵深回绕一律放在着色器里（GPU 侧 mod 取模），前端每帧只推一个"已飞行距离"；
 //    星屑/光尘/星云加到几千个也不掉帧——绝不要改成逐帧在 JS 里改顶点或重建几何体。
 // 2) 回绕必须发生在看不见的地方（相机后方 + 远平面附近），两端淡入淡出是配套手段。
-// 3) CPU 侧只更新十几个对象（悬浮几何体、流星），这个数量级不能涨。
+// 3) CPU 侧只更新十几个对象（流星、天穹层的月亮/卫星/低云），这个数量级不能涨。
 // 4) 推进量只由"滚动位置"决定（可逆、按可滚动范围归一化并夹紧），不做时间累积式单向飞行。
 import type * as ThreeNS from "three";
 import {
@@ -17,6 +17,7 @@ import {
   STAR_FRAG,
   STAR_VERT,
 } from "@/lib/three-shaders";
+import { createSkyDome } from "@/lib/sky-dome";
 
 type ThreeModule = typeof import("three");
 
@@ -33,10 +34,10 @@ const PAGE_TRAVEL = 2400;
 /** 大面积柔光：只提亮不遮底 → 加色混合 */
 const GLOW = [0xf58cbe, 0xbf86e8, 0x74b8e8, 0x7ad3b8] as const;
 /**
- * 星屑色：饱和但不深。太深在接近纯白的底上会变成一颗颗小黑点，
- * 只有「饱和实心核 + 光针」才读得出是星。
+ * 星屑色：发光体本身。真实星的色差只是「偏冷 / 偏暖」，不是粉紫青；
+ * 配合加色混合与黄昏底，白芯 + 淡彩晕才读得出「亮」而不是「黑点」或「纸屑」。
  */
-const STAR = [0xe0449a, 0x7c4fe0, 0x2f83d6, 0x17a487] as const;
+const STAR = [0xffffff, 0xdce8ff, 0xfff0d6, 0xe4dcff] as const;
 /**
  * 深色结构色：只给几何体线框与流星用 —— 它们靠明度差读出轮廓，越深越清楚。
  */
@@ -62,10 +63,9 @@ interface StarLayerOptions {
   ySpread: number;
   speedMin: number;
   speedMax: number;
+  /** 星点屏幕直径区间（CSS 像素）；实际取值按星等幂律落在区间内，亮星极稀 */
   sizeMin: number;
   sizeMax: number;
-  /** 每 N 颗出现一颗大星（0 表示不出现） */
-  bigEvery: number;
   opacity: number;
   /** 是否把大部分粒子压进一条斜向密带（银河） */
   banded: boolean;
@@ -108,6 +108,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 900);
   camera.position.set(0, 0, CAMERA_Z);
+  // 天穹层是相机的子节点，相机必须在场景图里才会被遍历到
+  scene.add(camera);
 
   const renderer = new THREE.WebGLRenderer({
     alpha: true,
@@ -131,7 +133,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
 
   const travelUniforms: { value: number }[] = [];
   const timeUniforms: { value: number }[] = [];
-  const scaleUniforms: { value: number }[] = [];
+  const pxUniforms: { value: number }[] = [];
   const hueUniforms: { value: number }[] = [];
 
   // ── 星屑 / 光尘：一次 draw call，纵深回绕全在着色器里
@@ -141,6 +143,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     const hues = new Float32Array(opts.count);
     const phases = new Float32Array(opts.count);
     const speeds = new Float32Array(opts.count);
+    const tints = new Float32Array(opts.count);
+    const twinkles = new Float32Array(opts.count);
     const theta = 0.52; // 银河密带的倾角
     const ct = Math.cos(theta);
     const st = Math.sin(theta);
@@ -149,9 +153,13 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       const i3 = i * 3;
       let x: number;
       let y: number;
-      if (opts.banded && i % 100 < 55) {
+      if (opts.banded && i % 100 < 72) {
         const along = rand(-1, 1) * opts.xSpread * 1.35;
-        const side = (Math.random() + Math.random() + Math.random() - 1.5) * opts.ySpread * 0.24;
+        // 四个随机数之和 ≈ 正态：真实银河是中心密、两翼淡的带，不是等宽粗条
+        let side = (Math.random() + Math.random() + Math.random() + Math.random() - 2) * opts.ySpread * 0.3;
+        // 尘埃暗带：带心一侧的一窄条把星挤开，形成银河被劈开的观感
+        const lane = opts.ySpread * 0.09;
+        if (Math.abs(side - lane) < opts.ySpread * 0.035) side *= 2.4;
         x = ct * along - st * side;
         y = st * along + ct * side;
       } else {
@@ -161,11 +169,20 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       positions[i3] = x;
       positions[i3 + 1] = y;
       positions[i3 + 2] = rand(0, opts.range);
-      const big = opts.bigEvery > 0 && i % opts.bigEvery === 0;
-      // 大星要足够大：星芒是「屏幕上 15px 以上」才成立的形态，小星只做点
-      sizes[i] = big
-        ? rand(opts.sizeMax * 2.0, opts.sizeMax * 3.6)
-        : rand(opts.sizeMin, opts.sizeMax);
+      // 星等 → 屏幕直径（CSS 像素）。肉眼星等是幂律分布：绝大多数只有 1~1.5px，
+      // 亮星极稀（全天 1 等星只有约 19 颗），绝不该出现 15~20px 的光斑。
+      const mag = Math.pow(Math.random(), 2.4);
+      sizes[i] = opts.sizeMin + mag * mag * (opts.sizeMax - opts.sizeMin);
+      // 暗光下视杆细胞不辨色：只有最亮约 7% 允许带色偏
+      tints[i] = mag > 0.93 ? 0.35 : 0;
+      // 闪烁只属于一部分星，其余保持稳定
+      twinkles[i] = Math.random() < 0.4 ? 1 : 0;
+      if (i % 1400 === 0) {
+        // 几颗「行星」：更亮、带明显色偏，但完全不闪 —— 面源会把抖动平均掉
+        sizes[i] = 5.2;
+        tints[i] = 0.55;
+        twinkles[i] = 0;
+      }
       hues[i] = Math.random();
       phases[i] = Math.random();
       speeds[i] = rand(opts.speedMin, opts.speedMax);
@@ -177,17 +194,19 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     geometry.setAttribute("aHue", new THREE.Float32BufferAttribute(hues, 1));
     geometry.setAttribute("aPhase", new THREE.Float32BufferAttribute(phases, 1));
     geometry.setAttribute("aSpeed", new THREE.Float32BufferAttribute(speeds, 1));
+    geometry.setAttribute("aTint", new THREE.Float32BufferAttribute(tints, 1));
+    geometry.setAttribute("aTwink", new THREE.Float32BufferAttribute(twinkles, 1));
 
     const uTravel = { value: 0 };
     const uTime = { value: 0 };
-    const uScale = { value: 1 };
+    const uPx = { value: 1 };
     const uHueShift = { value: 0 };
     const material = keep(
       new THREE.ShaderMaterial({
         uniforms: {
           uTravel,
           uTime,
-          uScale,
+          uPx,
           uHueShift,
           uRange: { value: opts.range },
           uOpacity: { value: opts.opacity },
@@ -200,7 +219,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
         fragmentShader: STAR_FRAG,
         transparent: true,
         depthWrite: false,
-        blending: THREE.NormalBlending,
+        // 星是光源：加色混合才能在黄昏底上「加出亮」。普通混合在近白区会被当成暗点
+        blending: THREE.AdditiveBlending,
       })
     );
 
@@ -209,7 +229,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     world.add(points);
     travelUniforms.push(uTravel);
     timeUniforms.push(uTime);
-    scaleUniforms.push(uScale);
+    pxUniforms.push(uPx);
     hueUniforms.push(uHueShift);
     return points;
   }
@@ -265,9 +285,9 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   // ── 极光带：顶点起伏的大平面，加色混合铺在星云之下
   function createRibbons(geometry: ThreeNS.PlaneGeometry): void {
     const configs = [
-      { y: 6.5, tilt: -0.2, amp: 2.0, freq: 0.18, speed: 0.3, phase: 0, colorA: GLOW[0], colorB: GLOW[1], opacity: 0.34 },
-      { y: -5.0, tilt: 0.16, amp: 1.6, freq: 0.24, speed: 0.42, phase: 150, colorA: GLOW[2], colorB: GLOW[3], opacity: 0.28 },
-      { y: 0.8, tilt: -0.08, amp: 1.3, freq: 0.3, speed: 0.56, phase: 270, colorA: GLOW[1], colorB: GLOW[2], opacity: 0.2 },
+      { y: 6.5, tilt: -0.2, amp: 2.0, freq: 0.18, speed: 0.3, phase: 0, colorA: GLOW[0], colorB: GLOW[1], opacity: 0.2 },
+      { y: -5.0, tilt: 0.16, amp: 1.6, freq: 0.24, speed: 0.42, phase: 150, colorA: GLOW[2], colorB: GLOW[3], opacity: 0.17 },
+      { y: 0.8, tilt: -0.08, amp: 1.3, freq: 0.3, speed: 0.56, phase: 270, colorA: GLOW[1], colorB: GLOW[2], opacity: 0.12 },
     ].slice(0, isMobile ? 2 : 3);
 
     for (const cfg of configs) {
@@ -315,7 +335,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       keep(new THREE.TorusKnotGeometry(0.95, 0.3, 72, 8)),
       keep(new THREE.DodecahedronGeometry(1.4, 0)),
     ];
-    const count = isMobile ? 7 : 14;
+    // 几何体只当「远处的点缀物」，一旦数量上到两位数就会抢走星野的主体地位
+    const count = isMobile ? 2 : 3;
     for (let i = 0; i < count; i++) {
       const geo = geometries[i % geometries.length];
       // 双层：实心半透明面给体积，锐利线框给轮廓。浅底上只画线框会看不见
@@ -323,7 +344,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
         new THREE.MeshBasicMaterial({
           color: DEEP[i % DEEP.length],
           transparent: true,
-          opacity: 0.12,
+          opacity: 0.06,
           depthWrite: false,
           side: THREE.DoubleSide,
         })
@@ -333,7 +354,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
           color: DEEP[i % DEEP.length],
           wireframe: true,
           transparent: true,
-          opacity: 0.8,
+          opacity: 0.3,
           depthWrite: false,
         })
       );
@@ -343,7 +364,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       line.renderOrder = 1;
       const mesh = new THREE.Group();
       mesh.add(face, line);
-      mesh.scale.setScalar(rand(0.9, 2.4));
+      mesh.scale.setScalar(rand(0.35, 0.8));
       mesh.frustumCulled = false;
       world.add(mesh);
       shapes.push({
@@ -359,7 +380,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
         spinY: rand(-0.32, 0.32),
         phase: rand(0, Math.PI * 2),
         bob: rand(0.6, 2.2),
-        baseOpacity: rand(0.5, 0.85),
+        baseOpacity: rand(0.14, 0.26),
       });
     }
   }
@@ -403,9 +424,11 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   }
 
   // ── 组装各层（移动端整体降载）
-  createRibbons(keep(new THREE.PlaneGeometry(64, 22, 48, 16)));
+  // 极光带与线框多面体已停用：真实夜空里没有这类元素，且它们会把画面主体从星野抢走
+  // （线框 0.8 不透明 + 14 颗时，观感直接变成「漂浮几何体」。要回旧效果恢复这两行即可）
+  // createRibbons(keep(new THREE.PlaneGeometry(64, 22, 48, 16)));
   const cloudGeometry = keep(new THREE.PlaneGeometry(1, 1));
-  const cloudCount = isMobile ? 3 : 6;
+  const cloudCount = isMobile ? 2 : 4;
   for (let i = 0; i < cloudCount; i++) {
     createCloud({
       geometry: cloudGeometry,
@@ -416,7 +439,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       range: CLOUD_RANGE,
       speed: rand(0.1, 0.32),
       phase: rand(0, CLOUD_RANGE),
-      opacity: rand(0.13, 0.21), // 有了亮边轮廓就不再是一团糊，可以回到中位
+      opacity: rand(0.05, 0.09), // 星云只是陪衬：压低它才能把星点的对比让出来
       soft: rand(2.4, 3.6),
       colorA: GLOW[i % GLOW.length],
       colorB: GLOW[(i + 2) % GLOW.length],
@@ -434,7 +457,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
       range: CLOUD_RANGE,
       speed: 0.06,
       phase: rand(0, CLOUD_RANGE),
-      opacity: 0.17,
+      opacity: 0.08,
       soft: 5.4, // 远景发光体收紧，避免大块糊面
       colorA: GLOW[(i + 1) % GLOW.length],
       colorB: GLOW[(i + 3) % GLOW.length],
@@ -442,35 +465,36 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     });
   }
   createStarLayer({
-    count: isMobile ? 1150 : 3200,
+    count: isMobile ? 2600 : 9000,
     range: STAR_RANGE,
     xSpread: 120,
     ySpread: 72,
     speedMin: 0.55,
     speedMax: 1.5,
-    // 尺寸必须让「光针」在屏幕上真的画得出来：小星 ~2px、亮星 15~22px
-    sizeMin: 0.18,
-    sizeMax: 0.6,
-    // 亮星再密就变吵，1/11 已经能形成明显的「亮星 / 微尘」两级层次
-    bigEvery: 11,
+    // 绝大多数星只有 1~1.5px，靠数量做密度；最亮一档也只到 4.75px
+    sizeMin: 1.35,
+    sizeMax: 5.2,
     opacity: 1,
     banded: true,
   });
   createStarLayer({
-    count: isMobile ? 520 : 1600,
+    count: isMobile ? 1100 : 3600,
     range: DUST_RANGE,
     xSpread: 80,
     ySpread: 46,
     speedMin: 1.0,
     speedMax: 2.4,
-    sizeMin: 0.09,
-    sizeMax: 0.24,
-    bigEvery: 0,
+    sizeMin: 1.2,
+    sizeMax: 2.6,
     opacity: 0.72,
     banded: false,
   });
-  createShapes();
+  // createShapes(); // 同上，几何体停用
   createMeteors(keep(new THREE.PlaneGeometry(1, 1)));
+
+  // 天穹层：月亮 / 卫星过境 / 低空云带 —— 挂在相机上，视为无限远
+  const dome = createSkyDome(THREE, { isMobile, reduceMotion });
+  camera.add(dome.group);
 
   // ── 滚动 → 穿越（可逆：只由滚动位置决定）
   let travel = 0;
@@ -515,6 +539,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     camera.position.y = -pointerY * 0.5;
     world.rotation.y = pointerX * 0.02;
     world.rotation.x = -pointerY * 0.012;
+
+    dome.update(step, elapsed, camera.aspect, pointerX, pointerY);
 
     for (const item of shapes) {
       const z = wrapZ(item.baseZ + travel * item.speed, item.range);
@@ -566,8 +592,10 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    const scale = (height * renderer.getPixelRatio()) / (2 * Math.tan((FOV * Math.PI) / 360));
-    for (const u of scaleUniforms) u.value = scale;
+    // 星点尺寸只由星等决定（CSS 像素），这里只需要像素比做换算。
+    // 不再用透视投影系数 —— 按 1/纵深 放大正是把近处星撑成 20~50px 光斑的来源。
+    const px = renderer.getPixelRatio();
+    for (const u of pxUniforms) u.value = px;
     readScroll();
     if (reduceMotion) {
       pose(0);
@@ -628,6 +656,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     window.removeEventListener("scroll", readScroll);
     window.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("webglcontextlost", onContextLost);
+    dome.dispose();
     for (const item of disposables) {
       try {
         item.dispose();
