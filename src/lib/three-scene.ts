@@ -4,8 +4,12 @@
 // 1) 纵深回绕一律放在着色器里（GPU 侧 mod 取模），前端每帧只推一个"已飞行距离"；
 //    星屑/光尘/星云加到几千个也不掉帧——绝不要改成逐帧在 JS 里改顶点或重建几何体。
 // 2) 回绕必须发生在看不见的地方（相机后方 + 远平面附近），两端淡入淡出是配套手段。
-// 3) CPU 侧只更新十几个对象（流星、天穹层的月亮/卫星/低云），这个数量级不能涨。
+// 3) CPU 侧只更新几十个对象（流星 + 天穹层的轨道天体），这个数量级不能涨；
+//    它们全是 `position/rotation/scale` 级别的变换，绝不逐帧改顶点或重建几何体。
 // 4) 推进量只由"滚动位置"决定（可逆、按可滚动范围归一化并夹紧），不做时间累积式单向飞行。
+// 5) 穿梭感来自**透视**：星点的屏幕速度 = uFly × uProj / d，近处必然比远处快得多。
+//    把尺寸改成常数可以（避免光斑），把 1/d 从速度里也拿掉就等于把三维场景拍扁 ——
+//    那就是用户说「没有穿梭的感觉」的根因。拖影按固定「快门时长」算，不按帧时长。
 import type * as ThreeNS from "three";
 import {
   CLOUD_FRAG,
@@ -30,6 +34,12 @@ const RIBBON_RANGE = 420;
 const SHAPE_RANGE = 180;
 /** 滑完一整页对应的飞行距离（世界单位） */
 const PAGE_TRAVEL = 2400;
+/**
+ * 拖影的「快门时长」（秒）。星迹长度 = 屏幕速度 × 这个值，
+ * 定成常数而不是帧时长，这样 30/60/144Hz 下拖影一样长，不会因为掉帧变长。
+ * 0.0025 是量着滚动速度定的：正常阅读速度下近处星拖 20px 上下，猛滑才铺满。
+ */
+const STREAK_SECONDS = 0.0025;
 
 /** 大面积柔光：只提亮不遮底 → 加色混合 */
 const GLOW = [0xf58cbe, 0xbf86e8, 0x74b8e8, 0x7ad3b8] as const;
@@ -63,9 +73,11 @@ interface StarLayerOptions {
   ySpread: number;
   speedMin: number;
   speedMax: number;
-  /** 星点屏幕直径区间（CSS 像素）；实际取值按星等幂律落在区间内，亮星极稀 */
+  /** 星点屏幕直径区间（CSS 像素，按 uRef 那一层平均纵深取值）；实际取值按星等幂律落在区间内，亮星极稀 */
   sizeMin: number;
   sizeMax: number;
+  /** 透视参考纵深：比它近的星更大更亮也更快 */
+  refDepth: number;
   opacity: number;
   /** 是否把大部分粒子压进一条斜向密带（银河） */
   banded: boolean;
@@ -135,6 +147,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   const timeUniforms: { value: number }[] = [];
   const pxUniforms: { value: number }[] = [];
   const hueUniforms: { value: number }[] = [];
+  const flyUniforms: { value: number }[] = [];
+  const projUniforms: { value: number }[] = [];
 
   // ── 星屑 / 光尘：一次 draw call，纵深回绕全在着色器里
   function createStarLayer(opts: StarLayerOptions): ThreeNS.Points {
@@ -201,6 +215,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     const uTime = { value: 0 };
     const uPx = { value: 1 };
     const uHueShift = { value: 0 };
+    const uFly = { value: 0 };
+    const uProj = { value: 900 };
     const material = keep(
       new THREE.ShaderMaterial({
         uniforms: {
@@ -208,6 +224,10 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
           uTime,
           uPx,
           uHueShift,
+          uFly,
+          uProj,
+          uStreak: { value: STREAK_SECONDS },
+          uRef: { value: opts.refDepth },
           uRange: { value: opts.range },
           uOpacity: { value: opts.opacity },
           uC1: { value: new THREE.Color(STAR[0]) },
@@ -231,6 +251,8 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     timeUniforms.push(uTime);
     pxUniforms.push(uPx);
     hueUniforms.push(uHueShift);
+    flyUniforms.push(uFly);
+    projUniforms.push(uProj);
     return points;
   }
 
@@ -469,11 +491,13 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     range: STAR_RANGE,
     xSpread: 120,
     ySpread: 72,
-    speedMin: 0.55,
-    speedMax: 1.5,
+    // 速度差就是视差：这一层拉开到 4 倍，近处明显甩开远处
+    speedMin: 0.42,
+    speedMax: 1.7,
     // 绝大多数星 2px 上下，最亮一档到 8px；仍远小于「光斑」区间
     sizeMin: 1.9,
     sizeMax: 8.2,
+    refDepth: 55,
     opacity: 1,
     banded: true,
   });
@@ -486,6 +510,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     speedMax: 2.4,
     sizeMin: 1.6,
     sizeMax: 3.6,
+    refDepth: 34,
     opacity: 0.72,
     banded: false,
   });
@@ -499,6 +524,9 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
   // ── 滚动 → 穿越（可逆：只由滚动位置决定）
   let travel = 0;
   let travelTarget = 0;
+  /** 平滑后的飞行速度（世界单位/秒），驱动星迹长度 */
+  let fly = 0;
+  let prevTravel = 0;
   let rise = 0;
   let riseTarget = 0;
   let pointerX = 0;
@@ -519,6 +547,13 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     const travelK = 1 - Math.exp(-step * 6);
     const pointerK = 1 - Math.exp(-step * 4);
     travel += (travelTarget - travel) * travelK;
+    if (step > 0) {
+      // 速度要平滑：拖动滚动条 / 点锚点跳转会产生瞬时的巨大速度，不滤就是满屏闪白线
+      const inst = (travel - prevTravel) / step;
+      fly += (inst - fly) * (1 - Math.exp(-step * 13));
+      prevTravel = travel;
+    }
+    for (const u of flyUniforms) u.value = fly;
     rise += (riseTarget - rise) * travelK;
     pointerX += (pointerTargetX - pointerX) * pointerK;
     pointerY += (pointerTargetY - pointerY) * pointerK;
@@ -596,6 +631,9 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     // 不再用透视投影系数 —— 按 1/纵深 放大正是把近处星撑成 20~50px 光斑的来源。
     const px = renderer.getPixelRatio();
     for (const u of pxUniforms) u.value = px;
+    // 1 个世界单位在 d=1 处占多少设备像素：透视尺寸与拖影长度都靠它换算
+    const proj = height * px * 0.5 / Math.tan((FOV * Math.PI) / 360);
+    for (const u of projUniforms) u.value = proj;
     readScroll();
     if (reduceMotion) {
       pose(0);

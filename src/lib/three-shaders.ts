@@ -9,7 +9,7 @@
 // - 加色混合：星要「亮过底」，底必须比星暗（见 ThreeBackground.tsx 的黄昏底）。
 // - 闪烁只给一部分星，幅度随仰角降低而增大（大气路径更长），频率 0.2~1.2Hz 量级。
 
-/** 星屑 / 光尘：一次 draw call 画几千颗，纵深循环 + 星等定尺寸 + 随仰角消光与闪烁 */
+/** 星屑 / 光尘：一次 draw call 画几千颗，纵深循环 + 透视分级 + 随仰角消光与滚动拖影 */
 export const STAR_VERT = /* glsl */ `
 attribute float aSize;
 attribute float aHue;
@@ -21,6 +21,10 @@ uniform float uTravel;
 uniform float uTime;
 uniform float uPx;
 uniform float uRange;
+uniform float uRef;
+uniform float uProj;
+uniform float uFly;
+uniform float uStreak;
 varying float vFade;
 varying float vHue;
 varying float vTint;
@@ -28,12 +32,16 @@ varying float vTwAmp;
 varying float vTwRate;
 varying float vRay;
 varying float vFar;
+varying float vCore;
+varying float vTail;
+varying vec2 vDir;
 void main() {
   vec3 p = position;
   // 走满 uRange 就从最远处重新开始：永远滑不到头
   p.z = mod(position.z + uTravel * aSpeed, uRange) - uRange * 0.5;
-  vec4 clip = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-  float d = -(modelViewMatrix * vec4(p, 1.0)).z;
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  vec4 clip = projectionMatrix * mv;
+  float d = -mv.z;
   vFade = smoothstep(1.5, 9.0, d) * (1.0 - smoothstep(uRange * 0.42, uRange * 0.56, d));
 
   // 画面下方 = 地平线方向：大气路径更长 → 更暗（消光）但更容易闪、色偏更明显
@@ -49,10 +57,27 @@ void main() {
   vHue = aHue;
   vTint = aTint;
   vFar = clamp(d / uRange, 0.0, 1.0);
-  // aSize 就是目标 CSS 直径；乘像素比得到设备像素，再给一点抖动避免「全班一样大」
-  float px = aSize * uPx * mix(0.9, 1.12, fract(aPhase * 7.0));
-  vRay = smoothstep(15.0, 24.0, px);
-  gl_PointSize = px;
+  // ── 透视：uRef 是这一层的平均纵深，比它近的星更大、更亮，而且**明显更快**
+  float persp = clamp(uRef / max(d, 1.0), 0.35, 2.8);
+  // 尺寸只吃 45% 的透视量：全给会把近处星撑成光斑（当年「太模糊」的根因）。
+  // 穿梭感来自速度和拖影，不是来自把星画大。
+  float css = aSize * mix(1.0, persp, 0.45) * mix(0.9, 1.12, fract(aPhase * 7.0));
+  vCore = clamp(css * uPx, 1.2, 44.0) * 0.5;
+
+  // ── 滚动拖影：屏幕位移 = 纵深速度 × uProj / d，同样速度下近处拖得更长
+  float toward = 0.72 + 0.26 * fract(aPhase * 3.7);
+  float speed = abs(uFly) * aSpeed * toward * uProj / max(d, 1.0);
+  vec2 sp = clip.xy / max(0.0001, clip.w);
+  float radial = length(sp);
+  // 消失点附近没有横向位移可言，那里本该是「迎面而来」的一个亮点，不拖影
+  // 尾长与星核一起决定 sprite 尺寸：留够余量，绝不依赖驱动去 clamp gl_PointSize
+  //（被 clamp 的话 sprite 实际尺寸与 varying 不一致，星核会跑偏）。
+  vTail = clamp(speed * uStreak, 0.0, max(0.0, 78.0 - vCore * 2.0)) * smoothstep(0.02, 0.09, radial);
+  // uv 的 y 朝下、NDC 的 y 朝上 → 翻一下；尾迹拖在运动方向的反侧
+  vDir = radial < 0.0008 ? vec2(0.0, 1.0) : normalize(vec2(sp.x, -sp.y));
+  // 长尾巴上还挂四芒光针就成了「十字带毛刺」，只在几乎不拖影时才给
+  vRay = smoothstep(15.0, 24.0, vCore * 2.0) * (1.0 - smoothstep(1.0, 8.0, vTail));
+  gl_PointSize = clamp(2.0 * (vCore + vTail) + 2.0, 1.0, 168.0);
   gl_Position = clip;
 }`;
 
@@ -71,6 +96,9 @@ varying float vTwAmp;
 varying float vTwRate;
 varying float vRay;
 varying float vFar;
+varying float vCore;
+varying float vTail;
+varying vec2 vDir;
 vec3 palette(float h) {
   float x = fract(h);
   vec3 c = mix(uC1, uC2, clamp(x * 3.0, 0.0, 1.0));
@@ -87,19 +115,34 @@ float ray(vec2 p, float reach, float width) {
   return body * (1.0 - smoothstep(reach * 0.5, reach, along));
 }
 void main() {
-  vec2 uv = (gl_PointCoord - 0.5) * 2.0;
-  float r = length(uv);
-  if (r > 1.0) discard;
+  // sprite 里既有星核也有尾巴 → 一切按「设备像素」算，再除以星核半径归一
+  float halfPx = vCore + vTail + 1.0;
+  vec2 off = (gl_PointCoord - 0.5) * 2.0 * halfPx;
+  vec2 q = off - vDir * vTail; // 星核沿运动方向偏移，尾巴才拖在身后
+  vec2 n = q / max(vCore, 0.8);
+  float r = length(n);
+  if (r > 3.0) discard;
 
   // 高斯 PSF + 实心核：小尺寸下这就是肉眼看到的「一颗星」
   float psf = exp(-pow(r * 2.3, 2.0));
   float core = 1.0 - smoothstep(0.22, 0.62, r);
   float reach = mix(0.5, 0.28, vFar);
-  float rays = max(ray(uv, reach, 0.05), ray(uv.yx, reach, 0.05)) * vRay;
+  float rays = max(ray(n, reach, 0.05), ray(n.yx, reach, 0.05)) * vRay;
+
+  // 拖影：一道沿运动反方向指数衰减的细亮线，宽度跟着星核走 → 是「光」不是「棍」
+  float trail = 0.0;
+  if (vTail > 0.6) {
+    float along = dot(q, vDir);
+    float across = abs(q.x * vDir.y - q.y * vDir.x);
+    float back = max(-along, 0.0);
+    float prof = exp(-back / max(vTail * 0.45, 1.0)) * (1.0 - smoothstep(vCore * 0.35, vCore * 1.3, along));
+    float slit = exp(-pow(across / max(vCore * 0.62, 0.9), 2.0));
+    trail = prof * slit * mix(0.85, 0.42, smoothstep(6.0, 46.0, vTail));
+  }
 
   // 绝大多数星是纯白：暗光下视杆细胞不辨色，只有最亮几颗看得出蓝白 / 暖黄
   vec3 col = mix(vec3(1.0), palette(vHue + uHueShift), vTint);
-  float a = clamp(core * 1.0 + psf * 0.75 + rays * 0.6, 0.0, 1.0);
+  float a = clamp(core * 1.0 + psf * 0.75 + rays * 0.6 + trail, 0.0, 1.0);
   float tw = 1.0 - vTwAmp * (0.5 + 0.5 * sin(uTime * vTwRate + vHue * 6.2831));
   gl_FragColor = vec4(col, clamp(a * vFade * tw * uOpacity, 0.0, 1.0));
 }`;
