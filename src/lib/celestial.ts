@@ -240,15 +240,19 @@ void main() {
   vec2 p = (vUv - 0.5) * 2.0;
   float r = length(p);
   float horizon = 1.0 - smoothstep(0.2, 0.235, r);
-  float photon = exp(-pow((r - 0.26) / 0.022, 2.0));
+  // 光子环在 ~2.6rs（视界 5.2rs 的一半），之前放在 1.3 倍处太贴边
+  float photon = exp(-pow((r - 0.31) / 0.026, 2.0));
+  float halo = exp(-abs(r - 0.31) / 0.42) * 0.14;
   vec2 q = vec2(p.x * 0.62, p.y * 2.6 + p.x * 0.16);
   float dr = length(q);
   float disk = smoothstep(0.34, 0.5, dr) * (1.0 - smoothstep(1.02, 1.34, dr));
-  float swirl = 0.72 + 0.28 * vnoise(vec2(atan(p.y, p.x) * 3.0 + uTime * 0.5, dr * 7.0));
+  // 开普勒剪切：内圈转得快（Ω ∝ r^-1.5），盘才会拧出「绕着转」而不是整体平移
+  float kepler = uTime * 1.6 * pow(max(dr, 0.42), -1.5);
+  float swirl = 0.7 + 0.3 * vnoise(vec2(atan(p.y, p.x) * 3.0 + kepler, dr * 7.0));
   float doppler = 0.3 + 1.1 * smoothstep(-1.0, 1.0, p.x);
   float lens = exp(-pow((abs(p.y / 2.0) - 0.3) / 0.05, 2.0)) * (1.0 - smoothstep(0.45, 1.0, abs(p.x)));
   float glow = pow(max(0.0, 1.0 - r), 3.0) * 0.25;
-  float a = (photon * 0.85 + disk * swirl * doppler * 0.8 + lens * 0.35 + glow) * uOpacity;
+  float a = (photon * 0.85 + halo + disk * swirl * doppler * 0.8 + lens * 0.35 + glow) * uOpacity;
   vec3 col = mix(uColor, vec3(1.0, 0.95, 0.84), photon * 0.7 + disk * 0.2);
   gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * (1.0 - horizon));
 }`;
@@ -264,32 +268,40 @@ uniform float uOpacity;
 uniform float uTime;
 uniform float uTwist;
 uniform float uArms;
+uniform float uIncl;
 uniform vec3 uCore;
 uniform vec3 uArm;
 varying vec2 vUv;
 ${NOISE}
 void main() {
   vec2 p = (vUv - 0.5) * 2.0;
-  float r = length(p);
-  float theta = atan(p.y, p.x);
+  // 倾角只压盘面，核球仍是圆的高斯 —— 这个对比才读得出「一个侧着看的盘」，
+  // 整张图一起压扁只会得到一个椭圆贴图
+  vec2 q = vec2(p.x, p.y / max(0.3, uIncl));
+  float r = length(q);
+  float rb = length(p);
+  float theta = atan(q.y, q.x);
   // 对数螺线臂脊：r = a·e^(b·φ) → φ = ln(r/a)/b
   float armAng = log(max(r, 0.035) / 0.035) * uTwist + uTime * 0.05;
   // 到最近一条臂的角距，归一化到「一个臂间距 = 1」
   float d = fract((armAng - theta) * uArms / 6.28318 + 0.5) - 0.5;
   float width = 0.055 + 0.09 * r;                       // 外圈臂更散
   float ridge = exp(-pow(d / width, 2.0));
-  float bulge = exp(-pow(r * 3.3, 2.0));
+  float bulge = exp(-pow(rb * 3.3, 2.0)) + exp(-pow(rb * 9.0, 2.0)) * 0.6;
   float disk = exp(-r * 1.75) * smoothstep(1.0, 0.34, r);
   float arms = ridge * disk * smoothstep(0.03, 0.3, r);
   // 尘埃带：贴在臂脊内侧一点点，把星光挡住 → 臂才有「毛边」而不是光带
   float dust = exp(-pow((d + width * 0.55) / (width * 0.75), 2.0));
   arms *= 1.0 - dust * 0.62;
-  float grains = 0.78 + 0.22 * vnoise(vec2(theta * 5.0, r * 22.0));
+  // 噪声采样在「跟着臂一起旋」的坐标系里，团块才骑在臂上；在屏幕坐标采样就是糊成一片雾
+  float fr = -log(max(r, 0.035)) * uTwist + uTime * 0.05;
+  vec2 nq = vec2(q.x * cos(fr) - q.y * sin(fr), q.x * sin(fr) + q.y * cos(fr));
+  float grains = 0.62 + 0.62 * fbm3(nq * 3.2);
   // 星族决定颜色：核部年老偏黄、臂上年轻偏蓝、臂脊上点缀粉色 Hα 区
   vec3 col = uArm * (arms * grains) + uCore * bulge * 1.5;
   float ha = smoothstep(0.62, 0.95, vnoise(vec2(theta * 7.0, r * 13.0))) * ridge * disk;
   col += vec3(1.0, 0.42, 0.55) * ha * 0.5;
-  col += uArm * pow(max(0.0, 1.0 - r), 3.0) * 0.12;
+  col += uArm * pow(max(0.0, 1.0 - rb), 3.0) * 0.12;
   float lum = 1.35;
   col = vec3(1.0) - exp(-col * lum);                    // 指数色调映射，压住死白核
   float a = clamp((bulge * 0.85 + arms + ha * 0.4) * uOpacity, 0.0, 1.0);
@@ -344,6 +356,8 @@ interface Body {
   sats: Sat[];
   beamGroup?: Group;
   baseOpacity: number;
+  /** 彗星：尾巴按「背向光源」摆，而不是沿速度 */
+  antiSolarTail?: boolean;
 }
 
 export interface CelestialField {
@@ -539,11 +553,12 @@ export function createCelestialField(
         uTime: { value: 0 },
         uTwist: { value: rand(3.6, 5.2) },
         uArms: { value: Math.random() < 0.5 ? 2 : 3 },
+        uIncl: { value: rand(0.42, 0.95) },
         uCore: { value: new THREE.Color(0xfff0d4) },
         uArm: { value: new THREE.Color(0x9db8ff) },
       });
       const g = new THREE.Mesh(quad, m);
-      g.scale.set(r * 2, r * 1.24, 1);
+      g.scale.set(r * 2, r * 2, 1);
       g.rotation.z = rand(-1, 1);
       addSphere(b, g, m, 0.5);
       attachStreak(b, 0xc9b8ff);
@@ -553,6 +568,7 @@ export function createCelestialField(
       const r = 11;
       const b = blank(kind, r);
       b.speed = rand(1.15, 1.4);
+      b.antiSolarTail = true;
       const m = shader(COMET_FRAG, { uOpacity: { value: 1 }, uColor: { value: new THREE.Color(0xd8f0ff) } });
       const head = new THREE.Mesh(quad, m);
       head.scale.setScalar(r * 2);
@@ -604,12 +620,28 @@ export function createCelestialField(
 
         // ── 尾迹：屏幕速度（设备像素/秒）× 与星屑同一个快门
         b.root.getWorldPosition(wp);
+        const worldPos = wp.clone();
         wp.project(camera);
         const cx = wp.x;
         const cy = wp.y;
         const p = ndc[i];
         if (b.streak) {
-          if (!p.ok || step <= 0) {
+          if (b.antiSolarTail) {
+            // 彗尾：轴 = 彗星→光源 的反方向；越靠近光源越亮越长（活性 ∝ 1/距离²）
+            const away = new THREE.Vector3().subVectors(worldPos, light);
+            const dist = away.length();
+            away.normalize();
+            const act = Math.min(1, 14000 / (dist * dist));
+            const sx = away.x * (halfHeightPx / Math.max(20, d)) * camera.aspect;
+            const sy = -away.y * (halfHeightPx / Math.max(20, d));
+            const ang = Math.atan2(-sy, -sx);
+            const len = b.radius * (7 + 22 * act);
+            b.streak.mesh.visible = appear > 0.05;
+            b.streak.mesh.rotation.z = ang;
+            b.streak.mesh.scale.set(len, b.radius * (0.9 + act * 1.1), 1);
+            b.streak.mesh.position.set(-Math.cos(ang) * len * 0.5, -Math.sin(ang) * len * 0.5, -0.05);
+            b.streak.op.value = (0.16 + 0.34 * act) * appear;
+          } else if (!p.ok || step <= 0) {
             b.streak.mesh.visible = false;
           } else {
             const vx = ((cx - p.x) / step) * halfHeightPx * camera.aspect;
