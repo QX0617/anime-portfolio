@@ -254,7 +254,10 @@ void main() {
   float glow = pow(max(0.0, 1.0 - r), 3.0) * 0.25;
   float a = (photon * 0.85 + halo + disk * swirl * doppler * 0.8 + lens * 0.35 + glow) * uOpacity;
   vec3 col = mix(uColor, vec3(1.0, 0.95, 0.84), photon * 0.7 + disk * 0.2);
-  gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * (1.0 - horizon));
+  // 事件视界要「真的把背后的星挡住」：用普通混合画成不透明黑。
+  // 加色混合下视界只会是「这里少画一层」= 一个透明的圆洞，读不出黑洞。
+  float alpha = clamp(max(a, horizon * uOpacity), 0.0, 1.0);
+  gl_FragColor = vec4(col * (1.0 - horizon), alpha);
 }`;
 
 /**
@@ -535,7 +538,7 @@ export function createCelestialField(
         uOpacity: { value: 1 },
         uTime: { value: 0 },
         uColor: { value: new THREE.Color(0xffb86a) },
-      });
+      }, false);
       const disc = new THREE.Mesh(quad, m);
       disc.scale.setScalar(r * 2.2);
       disc.rotation.z = 0.24;
@@ -592,8 +595,16 @@ export function createCelestialField(
         const d = CAMERA_Z - z;
         b.root.position.set(b.baseX, b.baseY, z);
 
+        // 表观尺寸上限：屏幕半径超过半屏高就快速淡出。
+        // 不设这个的话，竖屏上一颗近处行星能盖掉 59% 的屏 —— 既贵又吃掉文字对比度，
+        // 而且「糊满屏的行星」本身就不好看：它应该已经擦着画面飞出去了。
+        const rPx = b.radius * halfHeightPx / Math.max(1, d);
+        const sizeCap = halfHeightPx * 1.05;
         // 远处进场淡入、近到糊屏淡出：两项方向相反，别写反（写反就等于只留贴脸那一段）
-        const appear = smooth(10, 34, d) * (1 - smooth(255, 335, d));
+        const appear =
+          smooth(10, 34, d) *
+          (1 - smooth(255, 335, d)) *
+          (1 - smooth(sizeCap * 0.55, sizeCap, rPx));
         if (d < 6 || appear < 0.012) {
           b.root.visible = false;
           ndc[i].ok = false;
