@@ -550,7 +550,7 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
 
   function pose(step: number): void {
     const travelK = 1 - Math.exp(-step * 6);
-    const pointerK = 1 - Math.exp(-step * 4);
+    const pointerK = 1 - Math.exp(-step * 7.5); // 跟随要够快，慢半拍的视差会被读成「没反应」
     travel += (travelTarget - travel) * travelK;
     if (step > 0) {
       // 速度要平滑：拖动滚动条 / 点锚点跳转会产生瞬时的巨大速度，不滤就是满屏闪白线
@@ -572,13 +572,15 @@ export function createThreeScene(THREE: ThreeModule, host: HTMLElement): () => v
     world.position.x = Math.sin(travel * 0.0024) * 2.6;
     world.rotation.z = Math.sin(travel * 0.0015) * 0.04;
 
-    // 鼠标视差：**平移相机**而不是旋转世界。
-    // 旋转会让远处物体位移更大（和视差相反），平移才会近大远小地错开，
-    // 这才是真正的“空间感”；顺带留一点点旋转当作“轻微转头”。
-    camera.position.x = pointerX * 0.78;
-    camera.position.y = -pointerY * 0.5;
-    world.rotation.y = pointerX * 0.02;
-    world.rotation.x = -pointerY * 0.012;
+    // 鼠标视差：**只平移相机，不旋转世界**。
+    // 旋转世界会让远处物体位移比近处更大 —— 那正好和视差相反，会把立体感抹平；
+    // 平移才产生 1/d 的错位（近处甩得多、远处几乎不动）。
+    // 之前只平移 0.78 个世界单位（近处星约 10px），所以用户反馈「效果不强」。
+    // 旋转量压到原来的 4 成，只当一点点「转头」的余韵。
+    camera.position.x = pointerX * 3.6;
+    camera.position.y = -pointerY * 2.4;
+    world.rotation.y = pointerX * 0.008;
+    world.rotation.x = -pointerY * 0.005;
 
     field.update(step, elapsed, travel, camera, halfH);
 
